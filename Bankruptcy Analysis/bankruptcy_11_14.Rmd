@@ -1,0 +1,401 @@
+---
+title: "Predicting bankruptcy in the telecommunications industry"
+author: "Hailey Yim" 
+output: html_document
+date: "2024-04-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Variable Selection Analysis
+
+### Import data
+```{r,warning=FALSE}
+set.seed(1234)
+bankruptcy = read.table("bankruptcy.dat",sep="\t",header=T,row.names=NULL)
+attach(bankruptcy)
+
+#remove first column (company)
+bankruptcy=bankruptcy[,-1]
+head(bankruptcy)
+```
+
+
+### Boxplots and correlation
+```{r,warning=FALSE}
+par(mfrow=c(2,3))
+boxplot(split(WC.TA,Bankrupt),style.bxp="old",xlab="Bankrupt",ylab="WC.TA",main="Boxplot of WC/TA")
+boxplot(split(RE.TA,Bankrupt),style.bxp="old",xlab="Bankrupt",ylab="RE.TA",main="Boxplot of RE/TA")
+boxplot(split(EBIT.TA,Bankrupt),style.bxp="old",xlab="Bankrupt",ylab="EBIT.TA",main="Boxplot of EBIT/TA")
+boxplot(split(S.TA,Bankrupt),style.bxp="old",xlab="Bankrupt",ylab="S.TA",main="Boxplot of S/TA")
+boxplot(split(BVE.BVL,Bankrupt),style.bxp="old",xlab="Bankrupt",ylab="BVE.BVL",main="Boxplot of BVE/BVL")
+
+cor(bankruptcy)
+```
+
+***Correlation coefficients can range from -1 to 1.***
+
+  ***- Values close to 1: Strong positive linear relationship.*** 
+  
+  ***- Values close to -1: Strong negative linear relationship.*** 
+  
+  ***- Values close to 0: No linear relationship***
+  
+
+**Correlation between variables:**
+
+  - The variables "WC.TA", "RE.TA", "EBIT.TA", and "BVE.BVL" all have a strong negative linear relationship between these variables and "Bankrupt".
+  - The correlation coefficient for the "S.TA" variable is 0.016, which is very small. This suggests that there may be a weak or no linear relationship between "S.TA" and "Bankrupt".
+
+### Fit full model vs reduced model (before outlier removal) for AIC, BIC comparison
+
+* **Deviance Residuals:** measure of model fit (difference between the observed response and the fitted values from the model)
+
+* **Null Deviance:** the deviance of the null model, which is the model with no predictor variables. 
+
+* **Residual Deviance:** the deviance of the fitted model. A lower residual deviance indicates a better fit to the data. 
+
+* **AIC:** a measure of the model's goodness of fit that penalizes model complexity. Lower AIC values indicate better fitting models.
+
+
+```{r,warning=FALSE}
+set.seed(1234)
+
+#Full
+bank1 = glm(Bankrupt ~ ., data=bankruptcy,family='binomial',maxit=500)
+summary(bank1)
+
+```
+
+
+```{r}
+#Reduced
+bank2 = glm(Bankrupt ~.-WC.TA, data=bankruptcy,family='binomial',maxit=500)
+summary(bank2)
+
+```
+
+### Compare AIC and BIC for full and reduced model
+
+Lower AIC and BIC values indicate better fitting models. 
+
+```{r,warning=FALSE}
+library(olsrr) 
+
+#Full AIC and BIC (GOF)
+c(AIC(bank1),BIC(bank1))
+
+#Reduced model AIC and BIC (GOF)
+c(AIC(bank2), BIC(bank2))
+
+
+```
+
+Reduced model has higher AIC and BIC values compared to the full model suggest that the full logistic regression model appears to provide a better fit to the data compared to the reduced model. 
+
+
+
+### Subselection AIC and BIC before outlier removal
+
+```{r,warning=FALSE}
+#Bestglm institutes the leaps algorithm but for GLM while leaps() library is only for linear models
+
+set.seed(1234)
+
+library(bestglm)
+
+#By BIC
+bestBIC <- bestglm(bankruptcy, IC="BIC",family=binomial)
+bestBIC
+
+```
+
+* The output indicate that the best model is selected based on the BIC criterion. 
+* The selected model includes the intercept, 'RE.TA', 'EBIT.TA', and 'BVE.BVL'. 
+* The 'BICq equivalent' line provides the range of BIC values for which the selected model is within a specified tolerance.
+
+
+```{r}
+# Model with selected variables based on the BIC criterion
+bank3= glm(Bankrupt ~ RE.TA+EBIT.TA+BVE.BVL, data=bankruptcy,family='binomial',maxit=500)
+summary(bank3)
+
+```
+
+* Intercept (-0.2948): the estimated log odds of bankruptcy when all predictor variables are zero. 
+* 1 unit increase in RE.TA is associated with a decrease in the log odds of bankruptcy by -0.05627 units, holding other variables constant. 
+
+
+```{r}
+#By AIC
+bestAIC <- bestglm(bankruptcy, IC="AIC",family=binomial)
+bestAIC
+```
+
+* The output indicate that the best model is selected based on the AIC criterion.
+* The selected model includes the intercept, 'WC.TA', 'RE.TA', 'EBIT.TA', and 'BVE.BVL'. 
+
+
+```{r}
+# Model with selected variables based on the AIC criterion
+bankAIC1= glm(Bankrupt ~ WC.TA+RE.TA+EBIT.TA+BVE.BVL, data=bankruptcy,family='binomial', maxit=500)
+summary(bankAIC1)
+
+```
+
+The AIC value for the selected model is 22.917, which indicates the goodness of fit of the model relative to other models considered. 
+
+```{r}
+# Testing for subset of regression coefficients
+
+gstat = deviance(bank3) - deviance(bank1)
+cbind(gstat, 1-pchisq(gstat,length(coef(bank1))-length(coef(bank3))))
+```
+
+* First value (gstat): the difference in deviance between the full model ('bank1') and the reduced model ('bank3'). bank1 provides a better fit. 
+
+* Second value (p-value): p-value associated with the likelihood ratio test using the chi-squared distribution. 
+
+Since the p-value (0.1326) is greater than 0.05, we fail to reject the null hypothesis at a significance level of 0.05. This suggests that there is not enough evidence to conclude that the full model significantly improves the fit compared to the reduced model (BIC criterion). In other words, excluding the predictors in 'bank3' does not significantly decrease the model's fit compared to the full model 'bank1'. 
+
+
+[Calculate and comparing AIC and BIC values for model selection]
+```{r,warning=FALSE}
+
+#Full AIC and BIC
+c(AIC(bank1),BIC(bank1))
+#Best subset AIC
+c(AIC(bank3), BIC(bank3))
+#Best subset BIC
+c(AIC(bankAIC1), BIC(bankAIC1))
+
+
+```
+
+The result suggest that the best subset model ('bankAIC1') provides the best trade-off between goodness of fit and model complexity, as it has the lowest AIC and BIC values among the models considered. 
+
+
+### Outlier removal
+
+```{r}
+# Calculate residuals
+residuals <- residuals(bankAIC1)
+
+# Optionally standardize residuals
+std_residuals <- rstandard(bankAIC1)
+
+# Plot residuals against predicted values
+plot(bankAIC1$fitted.values, residuals, 
+     xlab = "Predicted values", ylab = "Residuals",
+     main = "Residual Plot")
+
+# Identify potential outliers
+outliers <- which(abs(residuals) > 2 * sd(residuals)) # Adjust the multiplier as needed
+
+
+# Print indices of potential outliers
+print(outliers)
+
+# Optionally, visualize outliers on the plot
+points(fitted(bankAIC1)[outliers], residuals[outliers], col = "red", pch = 16)
+
+# Investigate outliers further by examining corresponding data points
+bankruptcy[outliers, ]
+
+
+```
+
+```{r,warning=FALSE}
+set.seed(1234)
+
+#Remove one outlier
+bank_cleaned = bankruptcy[-1,]
+detach(bankruptcy)
+attach(bank_cleaned)
+
+
+bank_new_full=glm(Bankrupt ~ ., data=bank_cleaned,family='binomial',maxit=500)
+summary(bank_new_full)
+
+
+```
+
+### Test overall regression
+The null hypothesis is that the full model does not provide a significantly better fit than than null model. 
+```{r,warning=FALSE}
+gstat = bank_new_full$null.deviance - deviance(bank_new_full)
+cbind(gstat, 1-pchisq(gstat,length(coef(bank_new_full))-1))
+```
+
+Since the p-value is extremely small (< 0.05), we reject the null hypothesis. 
+
+Therefore, we conclude that the full model provides a significantly better fit to the data compared to the null model. 
+
+
+### Search for best model, AIC and BIC using bestglm. 
+```{r,warning=FALSE}
+set.seed(1234)
+library(bestglm)
+
+#By AIC
+bestAIC <- bestglm(bank_cleaned, IC="AIC",family=binomial)
+bestAIC
+
+#By BIC
+bestBIC <- bestglm(bank_cleaned, IC="BIC",family=binomial)
+bestBIC
+
+#With outlier removed they select the same variables
+bank4= glm(Bankrupt ~ RE.TA+EBIT.TA+BVE.BVL,data=bank_cleaned,family='binomial', maxit=500)
+summary(bank4)
+
+exp(coef(bank3)[-1])
+
+```
+
+* RE.TA: A one-unit increase in RE.TA, the odds of the outcome (Bankrupt) decreases by approximately 5.5% (0.945-1).
+
+* EBIT.TA: A one-unit increase in EBIT.TA, the odds of the outcome (Bankrupt) decreases by approximately 15.4% (0.846-1).
+
+* BVE.BVL: A one-unit increase in BVE.BVL, the odds of the outcome (Bankrupt) decreases by approximately 46.7% (0.533-1).
+
+```{r}
+exp(coef(bank4)[-1])
+```
+
+
+* RE.TA: A one-unit increase in RE.TA, the odds of the outcome (Bankrupt) decreases by approximately 7.9% (0.921-1).
+
+* EBIT.TA: A one-unit increase in EBIT.TA, the odds of the outcome (Bankrupt) decreases by approximately 23.5% (0.765-1).
+
+* BVE.BVL: A one-unit increase in BVE.BVL, the odds of the outcome (Bankrupt) decreases by approximately 70.4% (0.296-1).
+
+
+In both models, an increase in EBIT.TA and BVE.BVL is associated with lower odds of bankruptcy. This suggests that companies with higher earnings relative to their total assets are less likely to go bankrupt. 
+
+The effect of RE.TA is less consistent across the two models. It seems that the relationship between RE.TA and the likelihood of bankruptcy may vary or be less clear compared to the other variables. 
+
+
+### Apply Stepwise Regression
+#### Forward
+```{r,warning=FALSE}
+full = glm(Bankrupt ~ ., data=bank_cleaned,family='binomial'(link = "logit"),maxit=500)
+minimum = glm(Bankrupt ~ 1, data=bank_cleaned,family='binomial'(link = "logit"), maxit=500)
+n= nrow(bank_cleaned)
+#AIC
+fwd_AIC<-step(minimum, 
+     scope = list(lower=minimum,upper = full), 
+     direction = "forward", trace=F)
+fwd_AIC
+#BIC
+fwd_BIC<-step(minimum, 
+     scope = list(lower=minimum,upper = full), 
+     direction = "forward", trace=F, k=log(n))
+fwd_BIC
+```
+Both AIC and BIC select the same: RE.TA, BVE.BVL, EBIT.TA, WC.TA 
+
+#### Backward
+```{r,warning=FALSE}
+#backwards via AIC
+bck_AIC<-step(full, scope = list(lower=minimum, upper = full), direction = "backward", trace = F)
+bck_AIC
+#Backwards via BIC
+bck_BIC<-step(full, scope = list(lower=minimum, upper = full), direction = "backward", trace = F, k=log(n))
+bck_BIC
+
+```
+Backwards stepwsise regression selected the same 4:  WC.TA, RE.TA, EBIT.TA, BVE.BVL  
+
+#### Both Forward and Backward
+```{r,warning=FALSE}
+set.seed(1234)
+bth_AIC<-step(minimum, scope = list(lower=minimum, upper = full), direction = "both", trace=F)
+bth2_AIC<-step(full, scope = list(lower=minimum, upper = full), direction = "both", trace = F)
+
+bth_BIC<-step(minimum, scope = list(lower=minimum, upper = full), direction = "both", trace=F,k=log(n))
+bth2_BIC<-step(full, scope = list(lower=minimum, upper = full), direction = "both", trace = F,k=log(n))
+
+bth_AIC
+bth_BIC
+
+
+bank6=glm(Bankrupt ~ WC.TA+RE.TA+EBIT.TA+BVE.BVL, data=bank_cleaned,family='binomial'(link = "logit"), maxit=500)
+summary(bank6)
+```
+
+ WC.TA, RE.TA,  EBIT.TA, BVE.BVL  
+ 
+ once again the same four are selected. Bank 3 is this model
+
+### Regularized Regression
+
+#### scale variables
+```{r,warning=FALSE}
+set.seed(1234)
+bank_var<-scale(bank_cleaned[,-6])
+```
+
+
+### Ridge Regression
+```{r,warning=FALSE}
+library(glmnet)
+
+
+set.seed(49)
+
+
+# Code to conduct ridge regression, and find optimal lambda
+# the regularization parameter that minimizes the cross-validated error in the ridge regression model. 
+cv.ridge = cv.glmnet(bank_var, Bankrupt,family='binomial', alpha=0,type.measure ='class', nfolds=10)
+
+cv.ridge$lambda.min
+
+ridge.mod = glmnet(bank_var, Bankrupt,family='binomial',alpha=0, nlambda =100)
+
+#plot the ridge coef  path
+# a visual representation of how the coefficients change in response to different levels of regularization (lambda is the amount of regularization applied to the coefficients). The lambda is a tuning parameter that determines the strength of regularization (penalty) -> more shrinkage of coefficients towards zero. 
+plot(ridge.mod, xvar = "lambda", label = TRUE, lwd = 2)
+abline(v=log(cv.ridge$lambda.min),col='red',lty = 2,lwd=2)
+coef(ridge.mod, s = cv.ridge$lambda.min)
+```
+
+
+### Lasso Regression
+```{r,warning=FALSE}
+set.seed(49)
+
+# Code to conduct lasso regression, and find optimal lambda
+cv.lasso = cv.glmnet(bank_var, Bankrupt,family='binomial', alpha=1,type.measure ='class', nfolds=10)
+
+cv.lasso$lambda.min
+
+lasso.mod = glmnet(bank_var,Bankrupt,family='binomial',alpha=1, nlambda=100)
+
+#plot the lasso coef  path
+plot(lasso.mod, xvar = "lambda", label = TRUE, lwd = 2)
+abline(v=log(cv.lasso$lambda.min),col='red',lty = 2,lwd=2)
+coef(lasso.mod, s = cv.lasso$lambda.min)
+```
+
+
+### Elastic Net Regression using GLMNET
+```{r,warning=FALSE}
+set.seed(49)
+
+# Code to conduct elastic net regression, and find optimal lamb
+
+cv.elastic = cv.glmnet(bank_var,  Bankrupt,family='binomial', alpha=0.5,type.measure ='class', nfolds=10)
+
+cv.elastic$lambda.min
+
+elastic.mod = glmnet(bank_var,  Bankrupt,family='binomial',alpha=0.5, nlambda=100)
+
+#plot the elastic net coef  path
+plot(elastic.mod, xvar = "lambda", label = TRUE, lwd = 2)
+abline(v=log(cv.elastic$lambda.min),col='red',lty = 2,lwd=2)
+coef(elastic.mod, s = cv.elastic$lambda.min)
+```
+
